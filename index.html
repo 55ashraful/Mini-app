@@ -208,22 +208,19 @@
             const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
 
             if (tgUser && tgUser.id) {
-                // Use Telegram user ID as the primary identifier
                 const safeUserId = "tg_" + tgUser.id;
                 initializeAppWithUser(safeUserId, tgUser);
             } else {
-                // Fallback to anonymous auth if no user data
                 initializeAppWithUser(null, null);
             }
         } else {
-            // Fallback for non-Telegram environments
             initializeAppWithUser(null, null);
         }
     });
 
     function initializeAppWithUser(uid, tgUser) {
         handleSplashScreen();
-        if (uid) { // This means we have a Telegram user
+        if (uid) {
             userId = uid;
             listenForThemeChanges();
             database.ref('settings').on('value', snap => {
@@ -231,7 +228,7 @@
                 if (currentUserData) updateUI(currentUserData);
             });
             initializeUser(userId, tgUser);
-        } else { // This means we are in a browser or couldn't get user data
+        } else {
             auth.onAuthStateChanged(user => {
                 if (user) {
                     userId = user.uid;
@@ -255,14 +252,12 @@
             if (!snapshot.exists()) {
                 let newUser;
                 if (tgUser) {
-                    // This is a new Telegram user
                     const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim();
                     newUser = {
                         userId: uid,
                         username: fullName || tgUser.username || `tg_user_${tgUser.id}`,
                         telegramUsername: tgUser.username || 'Not available',
                         balance: 0,
-                        // ** The CORRECT way to get the profile picture **
                         avatar: tgUser.photo_url || 'https://i.ibb.co/jPGKy4Jq/1000029438.png', 
                         country: "Bangladesh",
                         joinDate: new Date().toISOString(),
@@ -270,7 +265,6 @@
                         transactions: {}, referrals: {}, miningSession: { active: false, endTime: 0 }, completedTasks: {}, completedAds: {}
                     };
                 } else {
-                    // This is a new user outside of Telegram
                     newUser = {
                         userId: uid, username: `user${Math.floor(1000 + Math.random() * 9000)}`, balance: 0,
                         avatar: 'https://i.ibb.co/jPGKy4Jq/1000029438.png', country: "Bangladesh",
@@ -280,15 +274,16 @@
                 }
                 
                 const urlParams = new URLSearchParams(window.location.search);
-                const refCode = urlParams.get('ref') || window.Telegram.WebApp.initDataUnsafe.start_param;
+                const refCodeFromUrl = urlParams.get('ref');
+                const refCodeFromTg = window.Telegram.WebApp.initDataUnsafe.start_param;
+                const refCode = refCodeFromTg || refCodeFromUrl;
+
                 if (refCode) grantRewardToReferrer(refCode, uid);
                 
                 userRef.set(newUser);
-                // The 'on' listener will automatically re-trigger with the new data, so no need to return
                 return;
             }
             
-            // This is an existing user
             currentUserData = snapshot.val();
             updateUI(currentUserData);
             checkMiningSessionCompletion();
@@ -440,7 +435,11 @@
     async function handleAdClick(event) {
         const button = event.currentTarget;
         const adId = button.id.replace('ad-btn-', ''), reward = parseFloat(button.dataset.reward), link = button.dataset.link;
-        window.Telegram.WebApp.openLink(link);
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.openLink(link);
+        } else {
+            window.open(link, '_blank');
+        }
         button.disabled = true;
         await database.ref(`users/${userId}/completedAds/${adId}`).set(firebase.database.ServerValue.TIMESTAMP);
         await database.ref(`users/${userId}/balance`).transaction(bal => (bal || 0) + reward);
@@ -511,7 +510,13 @@
     async function handleTaskClick(event) {
         const button = event.currentTarget;
         const taskId = button.dataset.taskId, reward = parseFloat(button.dataset.reward), link = button.dataset.link, bonusTime = parseFloat(button.dataset.bonusTime);
-        if (link && link !== 'undefined' && link !== "null") window.Telegram.WebApp.openLink(link);
+        if (link && link !== 'undefined' && link !== "null") {
+             if (window.Telegram && window.Telegram.WebApp) {
+                window.Telegram.WebApp.openLink(link);
+            } else {
+                window.open(link, '_blank');
+            }
+        }
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
         let isClaimable = (bonusTime > 0) ? (!lastCompletionTime || Date.now() >= (lastCompletionTime + bonusTime * 3600000)) : !lastCompletionTime;
@@ -546,7 +551,10 @@
         document.getElementById('start-mining-btn').addEventListener('click', startMining);
         document.getElementById('copy-btn').addEventListener('click', copyReferralLink);
         const shareBtn = document.getElementById('share-btn');
-        if (navigator.share) { shareBtn.style.display = 'flex'; shareBtn.addEventListener('click', shareReferralLink); }
+        if ((window.Telegram && window.Telegram.WebApp) || navigator.share) { 
+            shareBtn.style.display = 'flex'; 
+            shareBtn.addEventListener('click', shareReferralLink); 
+        }
     }
     
     async function handleAvatarUpload(event) {
@@ -573,8 +581,11 @@
     function copyReferralLink() { 
         const text = document.getElementById('referral-link').value;
         if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.writeText(text);
-            showToast('Referral link copied!');
+            window.Telegram.WebApp.writeText(text, (isCopied) => {
+                if (isCopied) {
+                    showToast('Referral link copied!');
+                }
+            });
         } else {
             fallbackCopyTextToClipboard(text);
         }
@@ -588,10 +599,11 @@
     }
     async function shareReferralLink() { 
         const link = document.getElementById('referral-link').value;
+        const text = 'Join me on this cool app!';
         if (window.Telegram && window.Telegram.WebApp) {
-             window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join me!')}`);
+             window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`);
         } else if (navigator.share) {
-            try { await navigator.share({ title: 'Join Me!', url: link }); } catch (err) { console.error("Share failed:", err); } 
+            try { await navigator.share({ title: 'Join Me!', text: text, url: link }); } catch (err) { console.error("Share failed:", err); } 
         }
     }
 
@@ -609,8 +621,8 @@
         document.getElementById('profile-avatar-header').style.backgroundImage = `url(${data.avatar})`;
         document.getElementById('wallet-balance').innerText = (data.balance || 0).toFixed(2);
         
-        const referralLink = `${window.location.origin}${window.location.pathname.replace(/\/$/, "")}?start=${data.referralCode}`;
-        if(document.getElementById('referral-link')) document.getElementById('referral-link').value = referralLink;
+        const plainUrl = window.location.origin + window.location.pathname.replace(/\/$/, "");
+        if(document.getElementById('referral-link')) document.getElementById('referral-link').value = `${plainUrl}?ref=${data.referralCode}`;
 
         if(document.getElementById('referral-count')) document.getElementById('referral-count').innerText = Object.keys(refs).length;
         if(document.getElementById('referral-info-text')) {
@@ -662,15 +674,20 @@
         const timerTextEl = document.getElementById('mining-timer-text');
         const miningDuration = appSettings?.miningDurationHours || 3;
         clearInterval(miningInterval);
+        
+        // If session is active and timer is running
         if (session?.active && session.endTime > Date.now()) {
             btn.disabled = true;
+            btn.innerText = 'MINING...';
+            btn.onclick = null; // Remove previous onclick
             miningInterval = setInterval(() => {
                 const left = session.endTime - Date.now();
                 if (left <= 0) {
                     clearInterval(miningInterval);
-                    timerTextEl.innerText = "Session completed!";
+                    timerTextEl.innerText = "Session completed! Claim your reward.";
                     btn.disabled = false;
-                    checkMiningSessionCompletion();
+                    btn.innerText = 'CLAIM REWARD';
+                    btn.onclick = claimMiningReward; // Assign claim function
                 } else {
                     const h = String(Math.floor(left / 3600000)).padStart(2, '0');
                     const m = String(Math.floor((left % 3600000) / 60000)).padStart(2, '0');
@@ -678,8 +695,19 @@
                     timerTextEl.innerText = `Time left: ${h}h ${m}m ${s}s`;
                 }
             }, 1000);
-        } else {
+        } 
+        // If session is active but timer has finished
+        else if (session?.active && session.endTime <= Date.now()) {
+            timerTextEl.innerText = "Session completed! Claim your reward.";
             btn.disabled = false;
+            btn.innerText = 'CLAIM REWARD';
+            btn.onclick = claimMiningReward; // Assign claim function
+        }
+        // If no active session
+        else {
+            btn.disabled = false;
+            btn.innerText = 'START MINING';
+            btn.onclick = startMining; // Assign start function
             timerTextEl.innerText = `Start a ${miningDuration}-hour session`;
         }
     }
@@ -688,17 +716,42 @@
         if (!userId) return;
         const session = currentUserData?.miningSession;
         if (session?.active && session.endTime <= Date.now()) {
-            database.ref('users/' + userId).transaction(data => {
-                if (data && data.miningSession.active) {
+            updateMiningUI(session); // Just call updateUI to set the button to "CLAIM" state
+        }
+    }
+
+    async function claimMiningReward() {
+        if (!userId) return showToast("User not identified.", "error");
+        const btn = document.getElementById('start-mining-btn');
+        btn.disabled = true;
+        btn.innerText = 'CLAIMING...';
+
+        const userRef = database.ref('users/' + userId);
+        try {
+            const { committed, snapshot } = await userRef.transaction(data => {
+                if (data && data.miningSession && data.miningSession.active && data.miningSession.endTime <= Date.now()) {
                     const miningReward = appSettings?.miningReward || 200;
                     data.balance = (data.balance || 0) + miningReward;
+                    
                     if (!data.transactions) data.transactions = {};
-                    const txId = database.ref().push().key;
+                    const txId = database.ref().child('transactions').push().key;
                     data.transactions[txId] = { type: 'mining_reward', amount: miningReward, date: new Date().toISOString() };
-                    data.miningSession.active = false;
+                    
+                    data.miningSession = { active: false, endTime: 0 }; 
                 }
                 return data;
             });
+
+            if (committed) {
+                showToast('Reward claimed!', 'success');
+            } else {
+                showToast('Could not claim reward, it might have been claimed already.', 'info');
+            }
+        } catch(error) {
+            showToast('An error occurred while claiming. Please try again.', 'error');
+            console.error("Claiming Error:", error);
+            btn.disabled = false; // Re-enable on error
+            btn.innerText = 'CLAIM REWARD';
         }
     }
 
@@ -778,7 +831,7 @@
             document.getElementById('withdraw-modal-overlay').style.display = 'none';
         } catch (error) { 
             showToast('An error occurred. Please try again.', 'error'); 
-            console.error("Withdrawal Error: ", error);
+            console.error("Withdrawal Error:", error);
         } finally { 
             btn.disabled = false; 
             btn.innerText = 'Submit Request'; 
@@ -823,7 +876,11 @@
     function populateCountries() { const countries = ["Bangladesh", "India", "Pakistan", "United States", "United Kingdom"]; const select = document.getElementById('country-select'); select.innerHTML = ''; countries.sort().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; select.appendChild(o); }); }
     function showToast(message, type = 'success') { const toast = document.getElementById('toast-message'); toast.textContent = message; toast.style.backgroundColor = type === 'error' ? 'var(--error-color)' : (type === 'info' ? '#3B82F6' : 'var(--success-color)'); toast.style.opacity = '1'; toast.style.bottom = '90px'; setTimeout(() => { toast.style.opacity = '0'; toast.style.bottom = '80px'; }, 3000); }
 
-    if (userId) {
+    // This listener should be set up only once userId is confirmed.
+    let withdrawalListenerAttached = false;
+    function setupWithdrawalListener() {
+        if (!userId || withdrawalListenerAttached) return;
+        withdrawalListenerAttached = true;
         database.ref('withdrawals').orderByChild('userId').equalTo(userId).on('child_changed', snapshot => {
             const withdrawal = snapshot.val();
             if ((withdrawal.status === 'approved' || withdrawal.status === 'rejected') && snapshot.key) {
@@ -836,6 +893,10 @@
             }
         });
     }
+    
+    // Call this function after user is initialized
+    setupWithdrawalListener();
+
 </script>
 </body>
 </html>
