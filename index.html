@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>mini app</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <!-- 1. Telegram Mini App Script (এই লাইনটি নতুন যোগ করা হয়েছে) -->
+    <!-- 1. Telegram Mini App Script -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
@@ -203,31 +203,35 @@
     let userId, currentUserData, appSettings, miningInterval, taskTimers = {}, adTimers = {};
 
     document.addEventListener('DOMContentLoaded', () => {
-        if (window.Telegram && window.Telegram.WebApp) {
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe) {
             window.Telegram.WebApp.ready();
-            const tgUser = window.Telegram.WebApp.initDataUnsafe?.user;
+            const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
 
             if (tgUser && tgUser.id) {
-                userId = "tg_" + tgUser.id; 
-                initializeAppWithUser(userId, tgUser);
+                // Use Telegram user ID as the primary identifier
+                const safeUserId = "tg_" + tgUser.id;
+                initializeAppWithUser(safeUserId, tgUser);
             } else {
+                // Fallback to anonymous auth if no user data
                 initializeAppWithUser(null, null);
             }
         } else {
+            // Fallback for non-Telegram environments
             initializeAppWithUser(null, null);
         }
     });
 
     function initializeAppWithUser(uid, tgUser) {
         handleSplashScreen();
-        if (uid) {
+        if (uid) { // This means we have a Telegram user
+            userId = uid;
             listenForThemeChanges();
             database.ref('settings').on('value', snap => {
                 appSettings = snap.val();
                 if (currentUserData) updateUI(currentUserData);
             });
-            initializeUser(uid, tgUser);
-        } else {
+            initializeUser(userId, tgUser);
+        } else { // This means we are in a browser or couldn't get user data
             auth.onAuthStateChanged(user => {
                 if (user) {
                     userId = user.uid;
@@ -245,33 +249,28 @@
     }
     
     function initializeUser(uid, tgUser = null) {
-        userId = uid; 
         const userRef = database.ref('users/' + uid);
 
         userRef.on('value', (snapshot) => {
             if (!snapshot.exists()) {
                 let newUser;
                 if (tgUser) {
+                    // This is a new Telegram user
                     const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim();
                     newUser = {
                         userId: uid,
                         username: fullName || tgUser.username || `tg_user_${tgUser.id}`,
                         telegramUsername: tgUser.username || 'Not available',
                         balance: 0,
-                        avatar: `https://i.ibb.co/jPGKy4Jq/1000029438.png`, // Default avatar first
+                        // ** The CORRECT way to get the profile picture **
+                        avatar: tgUser.photo_url || 'https://i.ibb.co/jPGKy4Jq/1000029438.png', 
                         country: "Bangladesh",
                         joinDate: new Date().toISOString(),
                         referralCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
                         transactions: {}, referrals: {}, miningSession: { active: false, endTime: 0 }, completedTasks: {}, completedAds: {}
                     };
-                    // Fetch and save user's profile photo
-                    window.Telegram.WebApp.getUserProfilePhotos({limit: 1}, (photos) => {
-                        if (photos && photos.length > 0) {
-                            database.ref('users/' + uid + '/avatar').set(photos[0]);
-                        }
-                    });
-
                 } else {
+                    // This is a new user outside of Telegram
                     newUser = {
                         userId: uid, username: `user${Math.floor(1000 + Math.random() * 9000)}`, balance: 0,
                         avatar: 'https://i.ibb.co/jPGKy4Jq/1000029438.png', country: "Bangladesh",
@@ -281,13 +280,15 @@
                 }
                 
                 const urlParams = new URLSearchParams(window.location.search);
-                const refCode = urlParams.get('ref');
+                const refCode = urlParams.get('ref') || window.Telegram.WebApp.initDataUnsafe.start_param;
                 if (refCode) grantRewardToReferrer(refCode, uid);
                 
                 userRef.set(newUser);
+                // The 'on' listener will automatically re-trigger with the new data, so no need to return
                 return;
             }
             
+            // This is an existing user
             currentUserData = snapshot.val();
             updateUI(currentUserData);
             checkMiningSessionCompletion();
@@ -439,7 +440,8 @@
     async function handleAdClick(event) {
         const button = event.currentTarget;
         const adId = button.id.replace('ad-btn-', ''), reward = parseFloat(button.dataset.reward), link = button.dataset.link;
-        window.open(link, '_blank'); button.disabled = true;
+        window.Telegram.WebApp.openLink(link);
+        button.disabled = true;
         await database.ref(`users/${userId}/completedAds/${adId}`).set(firebase.database.ServerValue.TIMESTAMP);
         await database.ref(`users/${userId}/balance`).transaction(bal => (bal || 0) + reward);
         const tx = { type: 'ad_reward', amount: reward, adId: adId, date: new Date().toISOString() };
@@ -509,7 +511,7 @@
     async function handleTaskClick(event) {
         const button = event.currentTarget;
         const taskId = button.dataset.taskId, reward = parseFloat(button.dataset.reward), link = button.dataset.link, bonusTime = parseFloat(button.dataset.bonusTime);
-        if (link && link !== 'undefined' && link !== "null") window.open(link, '_blank');
+        if (link && link !== 'undefined' && link !== "null") window.Telegram.WebApp.openLink(link);
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
         let isClaimable = (bonusTime > 0) ? (!lastCompletionTime || Date.now() >= (lastCompletionTime + bonusTime * 3600000)) : !lastCompletionTime;
@@ -568,7 +570,15 @@
         showToast('Settings saved!'); showScreen('mining-screen');
     }
     
-    function copyReferralLink() { fallbackCopyTextToClipboard(document.getElementById('referral-link').value); }
+    function copyReferralLink() { 
+        const text = document.getElementById('referral-link').value;
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.writeText(text);
+            showToast('Referral link copied!');
+        } else {
+            fallbackCopyTextToClipboard(text);
+        }
+    }
     function fallbackCopyTextToClipboard(text) {
         const ta = document.createElement("textarea"); ta.value = text; ta.style.position="fixed"; document.body.appendChild(ta);
         ta.focus(); ta.select();
@@ -576,7 +586,14 @@
         catch (err) { showToast('Could not copy link.', 'error'); }
         document.body.removeChild(ta);
     }
-    async function shareReferralLink() { try { await navigator.share({ title: 'Join Me!', url: document.getElementById('referral-link').value }); } catch (err) { console.error("Share failed:", err); } }
+    async function shareReferralLink() { 
+        const link = document.getElementById('referral-link').value;
+        if (window.Telegram && window.Telegram.WebApp) {
+             window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join me!')}`);
+        } else if (navigator.share) {
+            try { await navigator.share({ title: 'Join Me!', url: link }); } catch (err) { console.error("Share failed:", err); } 
+        }
+    }
 
     function updateUI(data) {
         if (!data || !appSettings) return;
@@ -591,7 +608,10 @@
         document.getElementById('username-header').innerText = data.username;
         document.getElementById('profile-avatar-header').style.backgroundImage = `url(${data.avatar})`;
         document.getElementById('wallet-balance').innerText = (data.balance || 0).toFixed(2);
-        if(document.getElementById('referral-link')) document.getElementById('referral-link').value = `${window.location.origin}${window.location.pathname}?ref=${data.referralCode}`;
+        
+        const referralLink = `${window.location.origin}${window.location.pathname.replace(/\/$/, "")}?start=${data.referralCode}`;
+        if(document.getElementById('referral-link')) document.getElementById('referral-link').value = referralLink;
+
         if(document.getElementById('referral-count')) document.getElementById('referral-count').innerText = Object.keys(refs).length;
         if(document.getElementById('referral-info-text')) {
             const rewardAmount = appSettings?.referralReward || 50;
@@ -803,7 +823,7 @@
     function populateCountries() { const countries = ["Bangladesh", "India", "Pakistan", "United States", "United Kingdom"]; const select = document.getElementById('country-select'); select.innerHTML = ''; countries.sort().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; select.appendChild(o); }); }
     function showToast(message, type = 'success') { const toast = document.getElementById('toast-message'); toast.textContent = message; toast.style.backgroundColor = type === 'error' ? 'var(--error-color)' : (type === 'info' ? '#3B82F6' : 'var(--success-color)'); toast.style.opacity = '1'; toast.style.bottom = '90px'; setTimeout(() => { toast.style.opacity = '0'; toast.style.bottom = '80px'; }, 3000); }
 
-    if (userId) { // Only set up this listener if userId is known
+    if (userId) {
         database.ref('withdrawals').orderByChild('userId').equalTo(userId).on('child_changed', snapshot => {
             const withdrawal = snapshot.val();
             if ((withdrawal.status === 'approved' || withdrawal.status === 'rejected') && snapshot.key) {
