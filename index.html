@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>mini app</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- 1. Telegram Mini App Script (এই লাইনটি নতুন যোগ করা হয়েছে) -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
         :root {
@@ -200,39 +202,92 @@
     const auth = firebase.auth();
     let userId, currentUserData, appSettings, miningInterval, taskTimers = {}, adTimers = {};
 
-    document.addEventListener('DOMContentLoaded', initializeApp);
+    document.addEventListener('DOMContentLoaded', () => {
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.ready();
+            const tgUser = window.Telegram.WebApp.initDataUnsafe?.user;
 
-    function initializeApp() {
+            if (tgUser && tgUser.id) {
+                userId = "tg_" + tgUser.id; 
+                initializeAppWithUser(userId, tgUser);
+            } else {
+                initializeAppWithUser(null, null);
+            }
+        } else {
+            initializeAppWithUser(null, null);
+        }
+    });
+
+    function initializeAppWithUser(uid, tgUser) {
         handleSplashScreen();
-        auth.onAuthStateChanged(user => {
-            if (user) {
-                userId = user.uid;
-                listenForThemeChanges();
-                database.ref('settings').on('value', snap => { 
-                    appSettings = snap.val();
-                    if(currentUserData) updateUI(currentUserData); 
-                });
-                initializeUser(userId);
-            } else { auth.signInAnonymously(); }
-        });
+        if (uid) {
+            listenForThemeChanges();
+            database.ref('settings').on('value', snap => {
+                appSettings = snap.val();
+                if (currentUserData) updateUI(currentUserData);
+            });
+            initializeUser(uid, tgUser);
+        } else {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    userId = user.uid;
+                    listenForThemeChanges();
+                    database.ref('settings').on('value', snap => {
+                        appSettings = snap.val();
+                        if (currentUserData) updateUI(currentUserData);
+                    });
+                    initializeUser(userId, null);
+                } else {
+                    auth.signInAnonymously().catch(error => console.error("Anonymous sign-in failed:", error));
+                }
+            });
+        }
     }
-
-    function initializeUser(uid) {
+    
+    function initializeUser(uid, tgUser = null) {
+        userId = uid; 
         const userRef = database.ref('users/' + uid);
+
         userRef.on('value', (snapshot) => {
             if (!snapshot.exists()) {
+                let newUser;
+                if (tgUser) {
+                    const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim();
+                    newUser = {
+                        userId: uid,
+                        username: fullName || tgUser.username || `tg_user_${tgUser.id}`,
+                        telegramUsername: tgUser.username || 'Not available',
+                        balance: 0,
+                        avatar: `https://i.ibb.co/jPGKy4Jq/1000029438.png`, // Default avatar first
+                        country: "Bangladesh",
+                        joinDate: new Date().toISOString(),
+                        referralCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+                        transactions: {}, referrals: {}, miningSession: { active: false, endTime: 0 }, completedTasks: {}, completedAds: {}
+                    };
+                    // Fetch and save user's profile photo
+                    window.Telegram.WebApp.getUserProfilePhotos({limit: 1}, (photos) => {
+                        if (photos && photos.length > 0) {
+                            database.ref('users/' + uid + '/avatar').set(photos[0]);
+                        }
+                    });
+
+                } else {
+                    newUser = {
+                        userId: uid, username: `user${Math.floor(1000 + Math.random() * 9000)}`, balance: 0,
+                        avatar: 'https://i.ibb.co/jPGKy4Jq/1000029438.png', country: "Bangladesh",
+                        joinDate: new Date().toISOString(), referralCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+                        transactions: {}, referrals: {}, miningSession: { active: false, endTime: 0 }, completedTasks: {}, completedAds: {}
+                    };
+                }
+                
                 const urlParams = new URLSearchParams(window.location.search);
                 const refCode = urlParams.get('ref');
-                const newUser = {
-                    userId: uid, username: `user${Math.floor(1000 + Math.random() * 9000)}`, balance: 0,
-                    avatar: 'https://i.ibb.co/jPGKy4Jq/1000029438.png', country: "Bangladesh", 
-                    joinDate: new Date().toISOString(), referralCode: Math.random().toString(36).substring(2, 8).toUpperCase(), 
-                    transactions: {}, referrals: {}, miningSession: { active: false, endTime: 0 }, completedTasks: {}, completedAds: {}
-                };
                 if (refCode) grantRewardToReferrer(refCode, uid);
+                
                 userRef.set(newUser);
                 return;
             }
+            
             currentUserData = snapshot.val();
             updateUI(currentUserData);
             checkMiningSessionCompletion();
@@ -521,7 +576,7 @@
         catch (err) { showToast('Could not copy link.', 'error'); }
         document.body.removeChild(ta);
     }
-    async function shareReferralLink() { try { await navigator.share({ title: 'Join Points Pro!', url: document.getElementById('referral-link').value }); } catch (err) { console.error("Share failed:", err); } }
+    async function shareReferralLink() { try { await navigator.share({ title: 'Join Me!', url: document.getElementById('referral-link').value }); } catch (err) { console.error("Share failed:", err); } }
 
     function updateUI(data) {
         if (!data || !appSettings) return;
@@ -574,6 +629,7 @@
     function calculateLevel(b) { return b >= 10000 ? {index: 3} : (b >= 2500 ? {index: 2} : {index: 1}); }
 
     function startMining() {
+        if (!userId) return showToast("User not identified. Please restart the app.", "error");
         if (currentUserData.miningSession?.active) return showToast("Mining session is already active.", "error");
         const miningDurationHours = appSettings?.miningDurationHours || 3;
         const endTime = Date.now() + (miningDurationHours * 3600000);
@@ -609,6 +665,7 @@
     }
     
     function checkMiningSessionCompletion() {
+        if (!userId) return;
         const session = currentUserData?.miningSession;
         if (session?.active && session.endTime <= Date.now()) {
             database.ref('users/' + userId).transaction(data => {
@@ -624,29 +681,65 @@
             });
         }
     }
+
+    async function sendTelegramNotification(details) {
+        const botToken = "7770968378:AAFkxe0YkyWU8j3ZdFaVd5mRRPXiz1_XDaA";
+        const chatId = "6864733991";
+        
+        const message = `
+<b>🔔 New Withdrawal Request! 🔔</b>
+
+<b>User Name:</b> ${details.username}
+<b>User ID:</b> <code>${details.userId}</code>
+<b>Amount:</b> ${details.amount} Points
+<b>Method:</b> ${details.method}
+<b>Account:</b> <code>${details.account}</code>
+        `;
+        
+        const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+        
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    text: message,
+                    parse_mode: 'HTML',
+                }),
+            });
+        } catch (error) {
+            console.error('Error sending Telegram message:', error);
+        }
+    }
     
     async function submitWithdrawal(event) {
+        if (!userId) return showToast("User not identified. Please restart.", "error");
         const amount = parseFloat(document.getElementById('withdraw-amount').value);
+        const method = document.getElementById('withdraw-network').value;
+        const account = document.getElementById('account-info-input').value.trim();
         const minPoints = appSettings?.minWithdrawalPoints || 2000;
-        const minRefs = (currentUserData.referrals ? Object.keys(currentUserData.referrals).length : 0);
+        const refCount = currentUserData.referrals ? Object.keys(currentUserData.referrals).length : 0;
         const requiredRefs = appSettings?.minReferrals || 20;
 
-        if (minRefs < requiredRefs) { return showToast(`You need at least ${requiredRefs} referrals. You have ${minRefs}.`, 'error'); }
+        if (refCount < requiredRefs) { return showToast(`You need at least ${requiredRefs} referrals. You have ${refCount}.`, 'error'); }
         if (isNaN(amount) || amount < minPoints) { return showToast(`Minimum withdrawal is ${minPoints} points.`, 'error'); }
         if (amount > currentUserData.balance) { return showToast("You don't have enough points.", 'error'); }
-
-        const account = document.getElementById('account-info-input').value.trim();
-        if (!account) return showToast('Please enter your account details.', 'error');
-        const btn = event.target; btn.disabled = true; btn.innerText = 'Submitting...';
+        if (!account) { return showToast('Please enter your account details.', 'error'); }
+        
+        const btn = event.target; 
+        btn.disabled = true; 
+        btn.innerText = 'Submitting...';
+        
         try {
             const reqRef = database.ref('withdrawals').push();
             const withdrawalId = reqRef.key;
-            const req = {
+            const reqData = {
                 withdrawalId, userId, amount, account, status: 'pending',
-                method: document.getElementById('withdraw-network').value,
-                username: currentUserData.username, date: firebase.database.ServerValue.TIMESTAMP
+                method: method, username: currentUserData.username, 
+                date: firebase.database.ServerValue.TIMESTAMP
             };
-            await reqRef.set(req);
+            await reqRef.set(reqData);
             
             const userTx = {
                 type: 'withdrawal_request', amount: -amount, date: new Date().toISOString(),
@@ -656,11 +749,24 @@
             
             await database.ref('users/' + userId + '/balance').set(firebase.database.ServerValue.increment(-amount));
             
-            showToast('Withdrawal request submitted!'); document.getElementById('withdraw-modal-overlay').style.display = 'none';
-        } catch (error) { showToast('An error occurred.', 'error'); } finally { btn.disabled = false; btn.innerText = 'Submit Request'; }
+            await sendTelegramNotification({
+                username: currentUserData.username, userId: userId,
+                amount: amount, method: method, account: account
+            });
+
+            showToast('Withdrawal request submitted!'); 
+            document.getElementById('withdraw-modal-overlay').style.display = 'none';
+        } catch (error) { 
+            showToast('An error occurred. Please try again.', 'error'); 
+            console.error("Withdrawal Error: ", error);
+        } finally { 
+            btn.disabled = false; 
+            btn.innerText = 'Submit Request'; 
+        }
     }
     
     function loadTransactionHistory() {
+        if (!userId) return;
         const container = document.getElementById('transaction-list');
         container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">Loading history...</p>`;
         
@@ -697,17 +803,19 @@
     function populateCountries() { const countries = ["Bangladesh", "India", "Pakistan", "United States", "United Kingdom"]; const select = document.getElementById('country-select'); select.innerHTML = ''; countries.sort().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; select.appendChild(o); }); }
     function showToast(message, type = 'success') { const toast = document.getElementById('toast-message'); toast.textContent = message; toast.style.backgroundColor = type === 'error' ? 'var(--error-color)' : (type === 'info' ? '#3B82F6' : 'var(--success-color)'); toast.style.opacity = '1'; toast.style.bottom = '90px'; setTimeout(() => { toast.style.opacity = '0'; toast.style.bottom = '80px'; }, 3000); }
 
-    database.ref('withdrawals').orderByChild('userId').equalTo(userId).on('child_changed', snapshot => {
-        const withdrawal = snapshot.val();
-        if ((withdrawal.status === 'approved' || withdrawal.status === 'rejected') && snapshot.key) {
-            database.ref(`users/${userId}/transactions`).orderByChild('withdrawalId').equalTo(snapshot.key).once('value', txSnap => {
-                if(txSnap.exists()){
-                    const txId = Object.keys(txSnap.val())[0];
-                    database.ref(`users/${userId}/transactions/${txId}`).update({ status: withdrawal.status });
-                }
-            });
-        }
-    });
+    if (userId) { // Only set up this listener if userId is known
+        database.ref('withdrawals').orderByChild('userId').equalTo(userId).on('child_changed', snapshot => {
+            const withdrawal = snapshot.val();
+            if ((withdrawal.status === 'approved' || withdrawal.status === 'rejected') && snapshot.key) {
+                database.ref(`users/${userId}/transactions`).orderByChild('withdrawalId').equalTo(snapshot.key).once('value', txSnap => {
+                    if(txSnap.exists()){
+                        const txId = Object.keys(txSnap.val())[0];
+                        database.ref(`users/${userId}/transactions/${txId}`).update({ status: withdrawal.status });
+                    }
+                });
+            }
+        });
+    }
 </script>
 </body>
 </html>
