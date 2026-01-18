@@ -578,25 +578,48 @@
         showToast('Settings saved!'); showScreen('mining-screen');
     }
     
-    function copyReferralLink() { 
-        const text = document.getElementById('referral-link').value;
-        if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.writeText(text, (isCopied) => {
-                if (isCopied) {
-                    showToast('Referral link copied!');
-                }
+    // START: ঠিক করা কোড
+    function copyReferralLink() {
+        const textToCopy = document.getElementById('referral-link').value;
+        if (!textToCopy) return;
+
+        // আধুনিক এবং নির্ভরযোগ্য পদ্ধতি (টেলিগ্রাম মিনি অ্যাপসহ সব আধুনিক ব্রাউজারে কাজ করবে)
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                showToast('Referral link copied!');
+            }).catch(err => {
+                // যদি কোনো কারণে উপরেরটি ফেইল করে, পুরোনো পদ্ধতিতে চেষ্টা করবে
+                fallbackCopyTextToClipboard(textToCopy);
             });
         } else {
-            fallbackCopyTextToClipboard(text);
+            // পুরোনো ডিভাইসের জন্য ফলব্যাক পদ্ধতি
+            fallbackCopyTextToClipboard(textToCopy);
         }
     }
+
     function fallbackCopyTextToClipboard(text) {
-        const ta = document.createElement("textarea"); ta.value = text; ta.style.position="fixed"; document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        try { document.execCommand('copy') ? showToast('Referral link copied!') : showToast('Could not copy link.', 'error'); } 
-        catch (err) { showToast('Could not copy link.', 'error'); }
-        document.body.removeChild(ta);
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.top = "-9999px";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showToast('Referral link copied!');
+            } else {
+                showToast('Could not copy link.', 'error');
+            }
+        } catch (err) {
+            showToast('Could not copy link.', 'error');
+        }
+        document.body.removeChild(textArea);
     }
+    // END: ঠিক করা কোড
+
     async function shareReferralLink() { 
         const link = document.getElementById('referral-link').value;
         const text = 'Join me on this cool app!';
@@ -621,8 +644,10 @@
         document.getElementById('profile-avatar-header').style.backgroundImage = `url(${data.avatar})`;
         document.getElementById('wallet-balance').innerText = (data.balance || 0).toFixed(2);
         
-        const plainUrl = window.location.origin + window.location.pathname.replace(/\/$/, "");
-        if(document.getElementById('referral-link')) document.getElementById('referral-link').value = `${plainUrl}?ref=${data.referralCode}`;
+        // আপনার দেওয়া তথ্য অনুযায়ী রেফারাল লিংক আপডেট করা হয়েছে
+        if(document.getElementById('referral-link')) {
+            document.getElementById('referral-link').value = `https://t.me/miniapp_24_bot/Mini_app?startapp=${data.referralCode}`;
+        }
 
         if(document.getElementById('referral-count')) document.getElementById('referral-count').innerText = Object.keys(refs).length;
         if(document.getElementById('referral-info-text')) {
@@ -657,7 +682,7 @@
     function calculateTodaysEarnings(txs) { return Object.values(txs || {}).filter(tx=>tx.date?.slice(0,10) === new Date().toISOString().slice(0,10) && tx.amount > 0).reduce((s,t)=>s+t.amount,0); }
     function calculateTotalWithdrawals(txs) { return Object.values(txs || {}).filter(tx=>tx.type === 'withdrawal_request' && tx.status === 'approved').reduce((s,t)=>s+Math.abs(t.amount),0); }
     function calculateReferralEarnings(txs) { return Object.values(txs || {}).filter(tx=>tx.type === 'referral_bonus').reduce((s,t)=>s+t.amount,0); }
-    function calculateTaskEarnings(txs) { return Object.values(txs || {}).filter(tx=>tx.type === 'task_reward').reduce((s,t)=>s+t.amount,0); }
+    function calculateTaskEarnings(txs) { return Object.values(txs || {}).filter(tx=>tx.type === 'task_reward' || tx.type === 'ad_reward').reduce((s,t)=>s+t.amount,0); }
     function calculateLevel(b) { return b >= 10000 ? {index: 3} : (b >= 2500 ? {index: 2} : {index: 1}); }
 
     function startMining() {
@@ -675,11 +700,10 @@
         const miningDuration = appSettings?.miningDurationHours || 3;
         clearInterval(miningInterval);
         
-        // If session is active and timer is running
         if (session?.active && session.endTime > Date.now()) {
             btn.disabled = true;
             btn.innerText = 'MINING...';
-            btn.onclick = null; // Remove previous onclick
+            btn.onclick = null;
             miningInterval = setInterval(() => {
                 const left = session.endTime - Date.now();
                 if (left <= 0) {
@@ -687,7 +711,7 @@
                     timerTextEl.innerText = "Session completed! Claim your reward.";
                     btn.disabled = false;
                     btn.innerText = 'CLAIM REWARD';
-                    btn.onclick = claimMiningReward; // Assign claim function
+                    btn.onclick = claimMiningReward;
                 } else {
                     const h = String(Math.floor(left / 3600000)).padStart(2, '0');
                     const m = String(Math.floor((left % 3600000) / 60000)).padStart(2, '0');
@@ -696,18 +720,16 @@
                 }
             }, 1000);
         } 
-        // If session is active but timer has finished
         else if (session?.active && session.endTime <= Date.now()) {
             timerTextEl.innerText = "Session completed! Claim your reward.";
             btn.disabled = false;
             btn.innerText = 'CLAIM REWARD';
-            btn.onclick = claimMiningReward; // Assign claim function
+            btn.onclick = claimMiningReward;
         }
-        // If no active session
         else {
             btn.disabled = false;
             btn.innerText = 'START MINING';
-            btn.onclick = startMining; // Assign start function
+            btn.onclick = startMining;
             timerTextEl.innerText = `Start a ${miningDuration}-hour session`;
         }
     }
@@ -716,7 +738,7 @@
         if (!userId) return;
         const session = currentUserData?.miningSession;
         if (session?.active && session.endTime <= Date.now()) {
-            updateMiningUI(session); // Just call updateUI to set the button to "CLAIM" state
+            updateMiningUI(session);
         }
     }
 
@@ -750,7 +772,7 @@
         } catch(error) {
             showToast('An error occurred while claiming. Please try again.', 'error');
             console.error("Claiming Error:", error);
-            btn.disabled = false; // Re-enable on error
+            btn.disabled = false;
             btn.innerText = 'CLAIM REWARD';
         }
     }
@@ -761,7 +783,6 @@
         
         const message = `
 <b>🔔 New Withdrawal Request! 🔔</b>
-
 <b>User Name:</b> ${details.username}
 <b>User ID:</b> <code>${details.userId}</code>
 <b>Amount:</b> ${details.amount} Points
@@ -876,7 +897,6 @@
     function populateCountries() { const countries = ["Bangladesh", "India", "Pakistan", "United States", "United Kingdom"]; const select = document.getElementById('country-select'); select.innerHTML = ''; countries.sort().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; select.appendChild(o); }); }
     function showToast(message, type = 'success') { const toast = document.getElementById('toast-message'); toast.textContent = message; toast.style.backgroundColor = type === 'error' ? 'var(--error-color)' : (type === 'info' ? '#3B82F6' : 'var(--success-color)'); toast.style.opacity = '1'; toast.style.bottom = '90px'; setTimeout(() => { toast.style.opacity = '0'; toast.style.bottom = '80px'; }, 3000); }
 
-    // This listener should be set up only once userId is confirmed.
     let withdrawalListenerAttached = false;
     function setupWithdrawalListener() {
         if (!userId || withdrawalListenerAttached) return;
@@ -894,8 +914,22 @@
         });
     }
     
-    // Call this function after user is initialized
-    setupWithdrawalListener();
+    document.addEventListener('DOMContentLoaded', () => {
+        // ... (the rest of the initialization logic)
+        // We call the listener setup after the user is potentially identified.
+        if (userId) {
+            setupWithdrawalListener();
+        } else {
+            // If using anonymous auth, wait for it to complete
+            const unsubscribe = auth.onAuthStateChanged(user => {
+                if (user) {
+                    userId = user.uid;
+                    setupWithdrawalListener();
+                    unsubscribe(); // Stop listening after we have the user
+                }
+            });
+        }
+    });
 
 </script>
 </body>
