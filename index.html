@@ -14,6 +14,7 @@
             --accent-color: #9EFF00; --accent-glow: rgba(158, 255, 0, 0.3);
             --text-color: #E5E7EB; --text-muted: #9CA3AF;
             --error-color: #F87171; --success-color: #3fb950;
+            --theme-color: #0088cc; /* ক্লেইম বাটনের জন্য একটি নতুন কালার */
         }
         body { margin: 0; font-family: 'Roboto', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         .app-container { width: 100%; max-width: 400px; height: 100vh; max-height: 850px; background-color: var(--primary-color); border-radius: 24px; box-shadow: 0 0 50px rgba(0, 0, 0, 0.8); display: flex; flex-direction: column; overflow: hidden; position: relative; border: 1px solid #374151; }
@@ -79,9 +80,8 @@
         .ad-info { flex-grow: 1; }
         .ad-info h4 { margin: 0 0 5px; font-size: 18px; font-weight: 500; color: var(--text-color); }
         .ad-info p { margin: 0; color: var(--accent-color); font-weight: bold; font-size: 16px; }
-        .ad-watch-btn { background-color: var(--accent-color); color: var(--primary-color); border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; }
-        .ad-watch-btn:disabled { background-color: #374151; color: #6B7280; cursor: not-allowed; }
-        .ad-watch-btn.timer-active { background-color: #4B5563; color: var(--text-color); cursor: not-allowed; }
+        .ad-watch-btn { background-color: #374151; color: var(--text-color); border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; min-width: 100px; text-align: center; transition: background-color 0.3s; }
+        .ad-watch-btn.available { background-color: var(--theme-color); color: white; } /* ক্লেইম করার জন্য বাটনের নতুন স্টাইল */
         .transaction-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background-color: var(--secondary-color); border-radius: 12px; border: 1px solid #374151; }
         .transaction-details p { margin: 0; }
         .transaction-details .type { font-weight: 500; }
@@ -275,8 +275,9 @@
                 
                 const urlParams = new URLSearchParams(window.location.search);
                 const refCodeFromUrl = urlParams.get('ref');
-                const refCodeFromTg = window.Telegram.WebApp.initDataUnsafe.start_param;
+                const refCodeFromTg = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe.start_param) ? window.Telegram.WebApp.initDataUnsafe.start_param : null;
                 const refCode = refCodeFromTg || refCodeFromUrl;
+
 
                 if (refCode) grantRewardToReferrer(refCode, uid);
                 
@@ -379,84 +380,176 @@
         });
     }
     
+    // START: ADS-SCREEN সম্পর্কিত ফাংশনগুলো আপনার নতুন চাহিদা অনুযায়ী পরিবর্তন করা হলো
+
     function loadAndDisplayAds() {
         if (!currentUserData) return;
         const container = document.getElementById('ads-list-container');
         container.innerHTML = `<p style="text-align:center; color: var(--text-muted);">Loading ads...</p>`;
-        database.ref('ads').once('value', snapshot => {
-            const ads = snapshot.val() || {};
-            container.innerHTML = '';
-            Object.values(adTimers).forEach(clearInterval); adTimers = {};
-            if (Object.keys(ads).length === 0) { container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No ads available.</p>`; return; }
-            for (const adId in ads) {
-                const ad = ads[adId];
-                const adCard = document.createElement('div');
-                adCard.className = 'ad-card';
-                adCard.innerHTML = `<div class="image-container"><img src="${ad.imageUrl}" alt="Ad"></div><div class="ad-info"><h4>${ad.title}</h4><p>+${ad.reward} Points</p></div><button class="ad-watch-btn" id="ad-btn-${adId}">Watch Ad</button>`;
-                container.appendChild(adCard);
-                updateAdButtonState(document.getElementById(`ad-btn-${adId}`), ad, adId);
-            }
+        
+        // .on() ব্যবহার করা হয়েছে যাতে ব্যবহারকারীর ডেটা পরিবর্তন হলে UI রিফ্রেশ হয়
+        database.ref('users/' + userId + '/completedAds').on('value', async () => {
+             const adsSnap = await database.ref('ads').once('value');
+             const userSnap = await database.ref('users/' + userId).once('value');
+
+             currentUserData = userSnap.val(); // currentUserData আপডেট করা হলো
+             const ads = adsSnap.val() || {};
+             
+             container.innerHTML = ''; // Clear previous ads
+             Object.values(adTimers).forEach(clearInterval);
+             adTimers = {};
+
+             if (Object.keys(ads).length === 0) {
+                 container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No ads available.</p>`;
+                 return;
+             }
+
+             for (const adId in ads) {
+                 const ad = ads[adId];
+                 const adCard = document.createElement('div');
+                 adCard.className = 'ad-card';
+                 adCard.innerHTML = `
+                     <div class="image-container"><img src="${ad.imageUrl}" alt="Ad"></div>
+                     <div class="ad-info">
+                         <h4>${ad.title}</h4>
+                         <p>+${ad.reward} Points</p>
+                     </div>
+                     <button class="ad-watch-btn" id="ad-btn-${adId}">Loading...</button>
+                 `;
+                 container.appendChild(adCard);
+                 updateAdButtonState(document.getElementById(`ad-btn-${adId}`), ad, adId);
+             }
         });
     }
-    
+
     function updateAdButtonState(button, ad, adId) {
+        if (!currentUserData || !button) return;
+
+        button.dataset.reward = ad.reward;
+        button.dataset.link = ad.link;
+        button.dataset.adId = adId;
+
         const completedAds = currentUserData.completedAds || {};
         const lastCompletionTime = completedAds[adId];
-        button.dataset.reward = ad.reward; button.dataset.link = ad.link;
-        if (ad.timer && ad.timer > 0) {
-            if (lastCompletionTime) {
-                const unlockTime = lastCompletionTime + (ad.timer * 3600000);
-                if (Date.now() < unlockTime) { startAdCountdown(button, unlockTime, adId); } 
-                else { button.innerText = 'Watch Ad'; button.disabled = false; button.classList.remove('timer-active'); }
-            } else { button.innerText = 'Watch Ad'; button.disabled = false; }
+        const cooldownSeconds = ad.timer || 86400; // Firebase থেকে timer (সেকেন্ডে) না পেলে ডিফল্ট ২৪ ঘন্টা
+        const cooldownMillis = cooldownSeconds * 1000;
+
+        // বাটন সবসময় ক্লিকযোগ্য থাকবে
+        button.disabled = false;
+
+        if (lastCompletionTime) {
+            const unlockTime = lastCompletionTime + cooldownMillis;
+            if (Date.now() < unlockTime) {
+                // টাইমার এখনো চলছে
+                startAdCountdown(button, unlockTime, adId);
+                button.dataset.claimable = "false";
+            } else {
+                // টাইমার শেষ, রিওয়ার্ড পাওয়ার জন্য প্রস্তুত
+                if (adTimers[adId]) clearInterval(adTimers[adId]);
+                button.innerText = 'Claim Reward';
+                button.classList.add('available');
+                button.classList.remove('timer-active');
+                button.dataset.claimable = "true";
+            }
         } else {
-            if (lastCompletionTime) { button.innerText = 'Watched'; button.disabled = true; } 
-            else { button.innerText = 'Watch Ad'; button.disabled = false; }
+            // এই বিজ্ঞাপন আগে দেখা হয়নি, রিওয়ার্ড পাওয়ার জন্য প্রস্তুত
+            button.innerText = 'Claim Reward';
+            button.classList.add('available');
+            button.classList.remove('timer-active');
+            button.dataset.claimable = "true";
         }
+
         button.removeEventListener('click', handleAdClick);
         button.addEventListener('click', handleAdClick);
     }
 
     function startAdCountdown(button, unlockTime, adId) {
         if (adTimers[adId]) clearInterval(adTimers[adId]);
-        button.disabled = true;
+
+        button.classList.remove('available');
+        button.classList.add('timer-active');
+
         const update = () => {
             const timeLeft = unlockTime - Date.now();
             if (timeLeft <= 0) {
-                clearInterval(adTimers[adId]); button.innerText = 'Watch Ad'; button.disabled = false; button.classList.remove('timer-active');
+                clearInterval(adTimers[adId]);
+                // বাটনকে আবার আপডেট করা হচ্ছে "Claim Reward" দেখানোর জন্য
+                button.innerText = 'Claim Reward';
+                button.classList.add('available');
+                button.classList.remove('timer-active');
+                button.dataset.claimable = "true";
             } else {
-                const h = String(Math.floor(timeLeft / 3600000)).padStart(2, '0'), m = String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, '0'), s = String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, '0');
-                button.innerText = `${h}:${m}:${s}`; button.classList.add('timer-active');
+                const h = String(Math.floor(timeLeft / 3600000)).padStart(2, '0');
+                const m = String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, '0');
+                const s = String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, '0');
+                button.innerText = `${h}:${m}:${s}`;
             }
         };
-        update(); adTimers[adId] = setInterval(update, 1000);
+
+        update();
+        adTimers[adId] = setInterval(update, 1000);
     }
 
     async function handleAdClick(event) {
         const button = event.currentTarget;
-        const adId = button.id.replace('ad-btn-', ''), reward = parseFloat(button.dataset.reward), link = button.dataset.link;
-        if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.openLink(link);
-        } else {
-            window.open(link, '_blank');
+        const adId = button.dataset.adId;
+        const reward = parseFloat(button.dataset.reward);
+        const link = button.dataset.link;
+        const isClaimable = button.dataset.claimable === "true";
+
+        // ১. বিজ্ঞাপনটি নতুন ট্যাবে ওপেন হবে (সবসময়)
+        if (link && link !== 'undefined' && link !== "null") {
+            if (window.Telegram && window.Telegram.WebApp) {
+                window.Telegram.WebApp.openLink(link);
+            } else {
+                window.open(link, '_blank');
+            }
         }
-        button.disabled = true;
-        await database.ref(`users/${userId}/completedAds/${adId}`).set(firebase.database.ServerValue.TIMESTAMP);
-        await database.ref(`users/${userId}/balance`).transaction(bal => (bal || 0) + reward);
-        const tx = { type: 'ad_reward', amount: reward, adId: adId, date: new Date().toISOString() };
-        await database.ref(`users/${userId}/transactions`).push().set(tx);
-        showToast(`You earned ${reward} points!`, 'success');
-        database.ref('ads/' + adId).once('value', snap => { updateAdButtonState(button, snap.val(), adId); });
+
+        // ২. শুধুমাত্র যদি রিওয়ার্ড পাওয়ার যোগ্য হয়, তবেই পয়েন্ট যোগ হবে
+        if (isClaimable) {
+            button.dataset.claimable = "false"; 
+            button.disabled = true;
+            button.innerText = "Claiming...";
+
+            try {
+                await database.ref(`users/${userId}/completedAds/${adId}`).set(firebase.database.ServerValue.TIMESTAMP);
+                await database.ref(`users/${userId}/balance`).transaction(bal => (bal || 0) + reward);
+                
+                const tx = { type: 'ad_reward', amount: reward, adId: adId, date: new Date().toISOString() };
+                await database.ref(`users/${userId}/transactions`).push().set(tx);
+
+                showToast(`You earned ${reward} points!`, 'success');
+                // ডেটাবেস লিসনার (.on) স্বয়ংক্রিয়ভাবে UI আপডেট করবে
+
+            } catch (error) {
+                console.error("Error claiming ad reward:", error);
+                showToast("An error occurred while claiming.", 'error');
+                button.disabled = false;
+                button.innerText = "Claim Reward";
+                button.dataset.claimable = "true";
+            }
+        } else {
+            // যদি রিওয়ার্ড পাওয়ার যোগ্য না হয়, শুধু টোস্ট মেসেজ দেখানো হবে
+            showToast("You can view the ad, but the reward is on cooldown.", "info");
+        }
     }
+    
+    // END: ADS-SCREEN সম্পর্কিত ফাংশনগুলোর পরিবর্তন শেষ
     
     function loadAndDisplayTasks() {
         if (!currentUserData) return;
         const tasksRef = database.ref('tasks');
-        tasksRef.once('value', snapshot => {
+        tasksRef.on('value', async (snapshot) => { // .on() করা হলো এবং async করা হলো
             const tasks = snapshot.val() || {};
             const container = document.getElementById('tasks-list-container');
             container.innerHTML = '';
             Object.values(taskTimers).forEach(clearInterval); taskTimers = {};
+
+            // ডেটাবেস থেকে সর্বশেষ ব্যবহারকারীর তথ্য আনা হচ্ছে
+            const userSnap = await database.ref('users/' + userId).once('value');
+            currentUserData = userSnap.val();
+
             if (Object.keys(tasks).length === 0) { container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No tasks available.</p>`; return; }
             for (const taskId in tasks) {
                 const task = tasks[taskId];
@@ -478,29 +571,53 @@
     }
 
     function updateTaskButtonState(button, task, taskId) {
+        if (!currentUserData || !button) return;
+
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
-        button.dataset.reward = task.reward; button.dataset.link = task.link; button.dataset.bonusTime = task.bonusTime || 0;
-        if (task.bonusTime > 0) {
+        button.dataset.reward = task.reward; button.dataset.link = task.link;
+        
+        const bonusTimeSeconds = task.bonusTime || 0; // Firebase থেকে সেকেন্ডে আসবে
+        const bonusTimeMillis = bonusTimeSeconds * 1000;
+
+        if (bonusTimeMillis > 0) {
             if (lastCompletionTime) {
-                const unlockTime = lastCompletionTime + (task.bonusTime * 3600000);
-                if (Date.now() < unlockTime) { startCountdown(button, unlockTime, taskId); } else { button.innerText = 'Claim'; button.disabled = false; }
-            } else { button.innerText = 'Claim'; button.disabled = false; }
+                const unlockTime = lastCompletionTime + bonusTimeMillis;
+                if (Date.now() < unlockTime) { 
+                    startTaskCountdown(button, unlockTime, taskId); 
+                } else { 
+                    button.innerText = 'Claim'; 
+                    button.disabled = false; 
+                    button.classList.remove('timer-active');
+                }
+            } else { 
+                button.innerText = 'Claim'; 
+                button.disabled = false; 
+            }
         } else {
-            if (lastCompletionTime) { button.innerText = 'Claimed'; button.disabled = true; } else { button.innerText = 'Claim'; button.disabled = false; }
+            if (lastCompletionTime) { 
+                button.innerText = 'Claimed'; 
+                button.disabled = true; 
+            } else { 
+                button.innerText = 'Claim'; 
+                button.disabled = false; 
+            }
         }
         button.removeEventListener('click', handleTaskClick);
         button.addEventListener('click', handleTaskClick);
     }
     
-    function startCountdown(button, unlockTime, taskId) {
+    function startTaskCountdown(button, unlockTime, taskId) {
         if (taskTimers[taskId]) clearInterval(taskTimers[taskId]);
+        button.disabled = true;
         const updateTimer = () => {
             const timeLeft = unlockTime - Date.now();
             if (timeLeft <= 0) {
                 clearInterval(taskTimers[taskId]); button.innerText = 'Claim'; button.disabled = false; button.classList.remove('timer-active');
             } else {
-                const h = String(Math.floor(timeLeft / 3600000)).padStart(2, '0'), m = String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, '0'), s = String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, '0');
+                const h = String(Math.floor(timeLeft / 3600000)).padStart(2, '0');
+                const m = String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, '0');
+                const s = String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, '0');
                 button.innerText = `${h}:${m}:${s}`; button.classList.add('timer-active');
             }
         };
@@ -509,7 +626,17 @@
     
     async function handleTaskClick(event) {
         const button = event.currentTarget;
-        const taskId = button.dataset.taskId, reward = parseFloat(button.dataset.reward), link = button.dataset.link, bonusTime = parseFloat(button.dataset.bonusTime);
+        const taskId = button.dataset.taskId;
+        const taskRef = database.ref('tasks/' + taskId);
+        const taskSnap = await taskRef.once('value');
+        const task = taskSnap.val();
+
+        if (!task) return;
+
+        const reward = parseFloat(task.reward);
+        const link = task.link;
+        const bonusTimeSeconds = task.bonusTime || 0;
+        
         if (link && link !== 'undefined' && link !== "null") {
              if (window.Telegram && window.Telegram.WebApp) {
                 window.Telegram.WebApp.openLink(link);
@@ -517,17 +644,29 @@
                 window.open(link, '_blank');
             }
         }
+        
+        const userSnap = await database.ref('users/' + userId).once('value');
+        currentUserData = userSnap.val();
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
-        let isClaimable = (bonusTime > 0) ? (!lastCompletionTime || Date.now() >= (lastCompletionTime + bonusTime * 3600000)) : !lastCompletionTime;
+        let isClaimable = (bonusTimeSeconds > 0) ? (!lastCompletionTime || Date.now() >= (lastCompletionTime + bonusTimeSeconds * 1000)) : !lastCompletionTime;
+        
         if (isClaimable) {
             button.disabled = true; button.innerText = 'Processing...';
-            await database.ref(`users/${userId}/completedTasks/${taskId}`).set(firebase.database.ServerValue.TIMESTAMP);
-            await database.ref(`users/${userId}/balance`).set(firebase.database.ServerValue.increment(reward));
-            const tx = { type: 'task_reward', amount: reward, taskId: taskId, date: new Date().toISOString() };
-            await database.ref(`users/${userId}/transactions`).push().set(tx);
-            showToast(`You earned ${reward} points!`);
-        } else if (lastCompletionTime) { showToast("Please wait for the timer to finish.", "info"); }
+            try {
+                await database.ref(`users/${userId}/completedTasks/${taskId}`).set(firebase.database.ServerValue.TIMESTAMP);
+                await database.ref(`users/${userId}/balance`).set(firebase.database.ServerValue.increment(reward));
+                const tx = { type: 'task_reward', amount: reward, taskId: taskId, date: new Date().toISOString() };
+                await database.ref(`users/${userId}/transactions`).push().set(tx);
+                showToast(`You earned ${reward} points!`);
+            } catch (error) {
+                 showToast('An error occurred. Please try again.', 'error');
+                 button.disabled = false;
+                 button.innerText = 'Claim';
+            }
+        } else if (lastCompletionTime) { 
+            showToast("Please wait for the timer to finish.", "info"); 
+        }
     }
     
     function setupEventListeners() {
@@ -578,21 +717,16 @@
         showToast('Settings saved!'); showScreen('mining-screen');
     }
     
-    // START: ঠিক করা কোড
     function copyReferralLink() {
         const textToCopy = document.getElementById('referral-link').value;
         if (!textToCopy) return;
-
-        // আধুনিক এবং নির্ভরযোগ্য পদ্ধতি (টেলিগ্রাম মিনি অ্যাপসহ সব আধুনিক ব্রাউজারে কাজ করবে)
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(textToCopy).then(() => {
                 showToast('Referral link copied!');
             }).catch(err => {
-                // যদি কোনো কারণে উপরেরটি ফেইল করে, পুরোনো পদ্ধতিতে চেষ্টা করবে
                 fallbackCopyTextToClipboard(textToCopy);
             });
         } else {
-            // পুরোনো ডিভাইসের জন্য ফলব্যাক পদ্ধতি
             fallbackCopyTextToClipboard(textToCopy);
         }
     }
@@ -618,7 +752,6 @@
         }
         document.body.removeChild(textArea);
     }
-    // END: ঠিক করা কোড
 
     async function shareReferralLink() { 
         const link = document.getElementById('referral-link').value;
@@ -644,7 +777,6 @@
         document.getElementById('profile-avatar-header').style.backgroundImage = `url(${data.avatar})`;
         document.getElementById('wallet-balance').innerText = (data.balance || 0).toFixed(2);
         
-        // আপনার দেওয়া তথ্য অনুযায়ী রেফারাল লিংক আপডেট করা হয়েছে
         if(document.getElementById('referral-link')) {
             document.getElementById('referral-link').value = `https://t.me/miniapp_24_bot/Mini_app?startapp=${data.referralCode}`;
         }
@@ -656,11 +788,12 @@
         }
         
         const miningReward = appSettings.miningReward || 200;
-        const miningDuration = appSettings.miningDurationHours || 3;
+        const miningDurationSeconds = appSettings.miningDurationSeconds || 10800;
+        const miningDurationHours = Math.floor(miningDurationSeconds / 3600);
         document.getElementById('mining-reward-display').innerText = `${miningReward} Points`;
         const timerTextEl = document.getElementById('mining-timer-text');
         if (!data.miningSession || !data.miningSession.active) {
-            timerTextEl.innerText = `Start a ${miningDuration}-hour session`;
+            timerTextEl.innerText = `Start a ${miningDurationHours}-hour session`;
         }
         updateMiningUI(data.miningSession);
     }
@@ -688,8 +821,8 @@
     function startMining() {
         if (!userId) return showToast("User not identified. Please restart the app.", "error");
         if (currentUserData.miningSession?.active) return showToast("Mining session is already active.", "error");
-        const miningDurationHours = appSettings?.miningDurationHours || 3;
-        const endTime = Date.now() + (miningDurationHours * 3600000);
+        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
+        const endTime = Date.now() + (miningDurationSeconds * 1000);
         database.ref('users/' + userId + '/miningSession').set({ active: true, endTime: endTime });
         showToast("Mining session started!");
     }
@@ -697,7 +830,8 @@
     function updateMiningUI(session) {
         const btn = document.getElementById('start-mining-btn');
         const timerTextEl = document.getElementById('mining-timer-text');
-        const miningDuration = appSettings?.miningDurationHours || 3;
+        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
+        const miningDurationHours = Math.floor(miningDurationSeconds / 3600);
         clearInterval(miningInterval);
         
         if (session?.active && session.endTime > Date.now()) {
@@ -730,7 +864,7 @@
             btn.disabled = false;
             btn.innerText = 'START MINING';
             btn.onclick = startMining;
-            timerTextEl.innerText = `Start a ${miningDuration}-hour session`;
+            timerTextEl.innerText = `Start a ${miningDurationHours}-hour session`;
         }
     }
     
@@ -778,7 +912,7 @@
     }
 
     async function sendTelegramNotification(details) {
-        const botToken = "7770968378:AAFkxe0YkyWU8j3ZdFaVd5mRRPXiz1_XDaA";
+        const botToken = "7770968378:AAER1ubec14YNX6MfjscwbcisqHW_SZXtDw";
         const chatId = "6864733991";
         
         const message = `
@@ -915,17 +1049,14 @@
     }
     
     document.addEventListener('DOMContentLoaded', () => {
-        // ... (the rest of the initialization logic)
-        // We call the listener setup after the user is potentially identified.
         if (userId) {
             setupWithdrawalListener();
         } else {
-            // If using anonymous auth, wait for it to complete
             const unsubscribe = auth.onAuthStateChanged(user => {
                 if (user) {
                     userId = user.uid;
                     setupWithdrawalListener();
-                    unsubscribe(); // Stop listening after we have the user
+                    unsubscribe(); 
                 }
             });
         }
