@@ -72,7 +72,7 @@
         .avatar-upload-container { position: relative; align-self: center; margin-bottom: 20px; }
         .settings-avatar { width: 100px; height: 100px; border-radius: 50%; background-size: cover; background-position: center; border: 3px solid var(--accent-color); cursor: pointer; background-color: var(--primary-color); }
         .avatar-upload-overlay { position: absolute; bottom: 0; right: 0; background: var(--accent-color); color: var(--primary-color); border-radius: 50%; padding: 5px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-        .task-btn.timer-active { background-color: #4B5563; color: var(--text-color); cursor: not-allowed; }
+        .task-btn.timer-active { background-color: #4B5563; color: var(--text-color); cursor: pointer; } /* cursor: not-allowed থেকে cursor: pointer করা হয়েছে */
         .ad-list-container { width: 100%; display: flex; flex-direction: column; gap: 15px; }
         .ad-card { background-color: var(--secondary-color); border-radius: 12px; padding: 15px; display: flex; align-items: center; gap: 12px; }
         .ad-card .image-container { width: 50px; height: 50px; flex-shrink: 0; }
@@ -609,19 +609,23 @@
     
     function startTaskCountdown(button, unlockTime, taskId) {
         if (taskTimers[taskId]) clearInterval(taskTimers[taskId]);
-        button.disabled = true;
         const updateTimer = () => {
             const timeLeft = unlockTime - Date.now();
             if (timeLeft <= 0) {
-                clearInterval(taskTimers[taskId]); button.innerText = 'Claim'; button.disabled = false; button.classList.remove('timer-active');
+                clearInterval(taskTimers[taskId]); 
+                button.innerText = 'Claim'; 
+                button.disabled = false; 
+                button.classList.remove('timer-active');
             } else {
                 const h = String(Math.floor(timeLeft / 3600000)).padStart(2, '0');
                 const m = String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, '0');
                 const s = String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, '0');
-                button.innerText = `${h}:${m}:${s}`; button.classList.add('timer-active');
+                button.innerText = `${h}:${m}:${s}`; 
+                button.classList.add('timer-active');
             }
         };
-        updateTimer(); taskTimers[taskId] = setInterval(updateTimer, 1000);
+        updateTimer(); 
+        taskTimers[taskId] = setInterval(updateTimer, 1000);
     }
     
     async function handleTaskClick(event) {
