@@ -72,7 +72,7 @@
         .avatar-upload-container { position: relative; align-self: center; margin-bottom: 20px; }
         .settings-avatar { width: 100px; height: 100px; border-radius: 50%; background-size: cover; background-position: center; border: 3px solid var(--accent-color); cursor: pointer; background-color: var(--primary-color); }
         .avatar-upload-overlay { position: absolute; bottom: 0; right: 0; background: var(--accent-color); color: var(--primary-color); border-radius: 50%; padding: 5px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-        .task-btn.timer-active { background-color: #4B5563; color: var(--text-color); cursor: pointer; } /* cursor: not-allowed থেকে cursor: pointer করা হয়েছে */
+        .task-btn.timer-active { background-color: #4B5563; color: var(--text-color); cursor: pointer; }
         .ad-list-container { width: 100%; display: flex; flex-direction: column; gap: 15px; }
         .ad-card { background-color: var(--secondary-color); border-radius: 12px; padding: 15px; display: flex; align-items: center; gap: 12px; }
         .ad-card .image-container { width: 50px; height: 50px; flex-shrink: 0; }
@@ -81,7 +81,7 @@
         .ad-info h4 { margin: 0 0 5px; font-size: 18px; font-weight: 500; color: var(--text-color); }
         .ad-info p { margin: 0; color: var(--accent-color); font-weight: bold; font-size: 16px; }
         .ad-watch-btn { background-color: #374151; color: var(--text-color); border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; min-width: 100px; text-align: center; transition: background-color 0.3s; }
-        .ad-watch-btn.available { background-color: var(--theme-color); color: white; } /* ক্লেইম করার জন্য বাটনের নতুন স্টাইল */
+        .ad-watch-btn.available { background-color: var(--theme-color); color: white; }
         .transaction-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background-color: var(--secondary-color); border-radius: 12px; border: 1px solid #374151; }
         .transaction-details p { margin: 0; }
         .transaction-details .type { font-weight: 500; }
@@ -287,7 +287,6 @@
             
             currentUserData = snapshot.val();
             updateUI(currentUserData);
-            checkMiningSessionCompletion();
             setupEventListeners();
             populateCountries();
         });
@@ -380,42 +379,30 @@
         });
     }
     
-    // START: ADS-SCREEN সম্পর্কিত ফাংশনগুলো আপনার নতুন চাহিদা অনুযায়ী পরিবর্তন করা হলো
-
     function loadAndDisplayAds() {
         if (!currentUserData) return;
         const container = document.getElementById('ads-list-container');
         container.innerHTML = `<p style="text-align:center; color: var(--text-muted);">Loading ads...</p>`;
-        
-        // .on() ব্যবহার করা হয়েছে যাতে ব্যবহারকারীর ডেটা পরিবর্তন হলে UI রিফ্রেশ হয়
         database.ref('users/' + userId + '/completedAds').on('value', async () => {
              const adsSnap = await database.ref('ads').once('value');
              const userSnap = await database.ref('users/' + userId).once('value');
-
-             currentUserData = userSnap.val(); // currentUserData আপডেট করা হলো
+             currentUserData = userSnap.val();
              const ads = adsSnap.val() || {};
-             
-             container.innerHTML = ''; // Clear previous ads
+             container.innerHTML = '';
              Object.values(adTimers).forEach(clearInterval);
              adTimers = {};
-
              if (Object.keys(ads).length === 0) {
                  container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No ads available.</p>`;
                  return;
              }
-
              for (const adId in ads) {
                  const ad = ads[adId];
                  const adCard = document.createElement('div');
                  adCard.className = 'ad-card';
                  adCard.innerHTML = `
                      <div class="image-container"><img src="${ad.imageUrl}" alt="Ad"></div>
-                     <div class="ad-info">
-                         <h4>${ad.title}</h4>
-                         <p>+${ad.reward} Points</p>
-                     </div>
-                     <button class="ad-watch-btn" id="ad-btn-${adId}">Loading...</button>
-                 `;
+                     <div class="ad-info"><h4>${ad.title}</h4><p>+${ad.reward} Points</p></div>
+                     <button class="ad-watch-btn" id="ad-btn-${adId}">Loading...</button>`;
                  container.appendChild(adCard);
                  updateAdButtonState(document.getElementById(`ad-btn-${adId}`), ad, adId);
              }
@@ -424,27 +411,20 @@
 
     function updateAdButtonState(button, ad, adId) {
         if (!currentUserData || !button) return;
-
         button.dataset.reward = ad.reward;
         button.dataset.link = ad.link;
         button.dataset.adId = adId;
-
         const completedAds = currentUserData.completedAds || {};
         const lastCompletionTime = completedAds[adId];
-        const cooldownSeconds = ad.timer || 86400; // Firebase থেকে timer (সেকেন্ডে) না পেলে ডিফল্ট ২৪ ঘন্টা
+        const cooldownSeconds = ad.timer || 86400;
         const cooldownMillis = cooldownSeconds * 1000;
-
-        // বাটন সবসময় ক্লিকযোগ্য থাকবে
         button.disabled = false;
-
         if (lastCompletionTime) {
             const unlockTime = lastCompletionTime + cooldownMillis;
             if (Date.now() < unlockTime) {
-                // টাইমার এখনো চলছে
                 startAdCountdown(button, unlockTime, adId);
                 button.dataset.claimable = "false";
             } else {
-                // টাইমার শেষ, রিওয়ার্ড পাওয়ার জন্য প্রস্তুত
                 if (adTimers[adId]) clearInterval(adTimers[adId]);
                 button.innerText = 'Claim Reward';
                 button.classList.add('available');
@@ -452,28 +432,23 @@
                 button.dataset.claimable = "true";
             }
         } else {
-            // এই বিজ্ঞাপন আগে দেখা হয়নি, রিওয়ার্ড পাওয়ার জন্য প্রস্তুত
             button.innerText = 'Claim Reward';
             button.classList.add('available');
             button.classList.remove('timer-active');
             button.dataset.claimable = "true";
         }
-
         button.removeEventListener('click', handleAdClick);
         button.addEventListener('click', handleAdClick);
     }
 
     function startAdCountdown(button, unlockTime, adId) {
         if (adTimers[adId]) clearInterval(adTimers[adId]);
-
         button.classList.remove('available');
         button.classList.add('timer-active');
-
         const update = () => {
             const timeLeft = unlockTime - Date.now();
             if (timeLeft <= 0) {
                 clearInterval(adTimers[adId]);
-                // বাটনকে আবার আপডেট করা হচ্ছে "Claim Reward" দেখানোর জন্য
                 button.innerText = 'Claim Reward';
                 button.classList.add('available');
                 button.classList.remove('timer-active');
@@ -485,7 +460,6 @@
                 button.innerText = `${h}:${m}:${s}`;
             }
         };
-
         update();
         adTimers[adId] = setInterval(update, 1000);
     }
@@ -496,60 +470,40 @@
         const reward = parseFloat(button.dataset.reward);
         const link = button.dataset.link;
         const isClaimable = button.dataset.claimable === "true";
-
-        // ১. বিজ্ঞাপনটি নতুন ট্যাবে ওপেন হবে (সবসময়)
         if (link && link !== 'undefined' && link !== "null") {
-            if (window.Telegram && window.Telegram.WebApp) {
-                window.Telegram.WebApp.openLink(link);
-            } else {
-                window.open(link, '_blank');
-            }
+            window.Telegram.WebApp.openLink(link);
         }
-
-        // ২. শুধুমাত্র যদি রিওয়ার্ড পাওয়ার যোগ্য হয়, তবেই পয়েন্ট যোগ হবে
         if (isClaimable) {
             button.dataset.claimable = "false"; 
             button.disabled = true;
             button.innerText = "Claiming...";
-
             try {
                 await database.ref(`users/${userId}/completedAds/${adId}`).set(firebase.database.ServerValue.TIMESTAMP);
                 await database.ref(`users/${userId}/balance`).transaction(bal => (bal || 0) + reward);
-                
                 const tx = { type: 'ad_reward', amount: reward, adId: adId, date: new Date().toISOString() };
                 await database.ref(`users/${userId}/transactions`).push().set(tx);
-
                 showToast(`You earned ${reward} points!`, 'success');
-                // ডেটাবেস লিসনার (.on) স্বয়ংক্রিয়ভাবে UI আপডেট করবে
-
             } catch (error) {
-                console.error("Error claiming ad reward:", error);
                 showToast("An error occurred while claiming.", 'error');
                 button.disabled = false;
                 button.innerText = "Claim Reward";
                 button.dataset.claimable = "true";
             }
         } else {
-            // যদি রিওয়ার্ড পাওয়ার যোগ্য না হয়, শুধু টোস্ট মেসেজ দেখানো হবে
             showToast("You can view the ad, but the reward is on cooldown.", "info");
         }
     }
     
-    // END: ADS-SCREEN সম্পর্কিত ফাংশনগুলোর পরিবর্তন শেষ
-    
     function loadAndDisplayTasks() {
         if (!currentUserData) return;
         const tasksRef = database.ref('tasks');
-        tasksRef.on('value', async (snapshot) => { // .on() করা হলো এবং async করা হলো
+        tasksRef.on('value', async (snapshot) => {
             const tasks = snapshot.val() || {};
             const container = document.getElementById('tasks-list-container');
             container.innerHTML = '';
             Object.values(taskTimers).forEach(clearInterval); taskTimers = {};
-
-            // ডেটাবেস থেকে সর্বশেষ ব্যবহারকারীর তথ্য আনা হচ্ছে
             const userSnap = await database.ref('users/' + userId).once('value');
             currentUserData = userSnap.val();
-
             if (Object.keys(tasks).length === 0) { container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">No tasks available.</p>`; return; }
             for (const taskId in tasks) {
                 const task = tasks[taskId];
@@ -562,8 +516,7 @@
                         <p style="margin:0;font-weight:500;">${task.title}</p>
                         <p style="margin:5px 0 0;font-size:14px;color:var(--accent-color);">+${task.reward} Points</p>
                     </div>
-                    <button class="btn task-btn" id="task-btn-${taskId}" data-task-id="${taskId}" style="width:auto;padding:8px 16px;font-size:14px;">Loading...</button>
-                `;
+                    <button class="btn task-btn" id="task-btn-${taskId}" data-task-id="${taskId}" style="width:auto;padding:8px 16px;font-size:14px;">Loading...</button>`;
                 container.appendChild(listItem);
                 updateTaskButtonState(listItem.querySelector('.task-btn'), task, taskId);
             }
@@ -572,14 +525,11 @@
 
     function updateTaskButtonState(button, task, taskId) {
         if (!currentUserData || !button) return;
-
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
         button.dataset.reward = task.reward; button.dataset.link = task.link;
-        
-        const bonusTimeSeconds = task.bonusTime || 0; // Firebase থেকে সেকেন্ডে আসবে
+        const bonusTimeSeconds = task.bonusTime || 0;
         const bonusTimeMillis = bonusTimeSeconds * 1000;
-
         if (bonusTimeMillis > 0) {
             if (lastCompletionTime) {
                 const unlockTime = lastCompletionTime + bonusTimeMillis;
@@ -631,33 +581,23 @@
     async function handleTaskClick(event) {
         const button = event.currentTarget;
         const taskId = button.dataset.taskId;
-        const taskRef = database.ref('tasks/' + taskId);
-        const taskSnap = await taskRef.once('value');
+        const taskSnap = await database.ref('tasks/' + taskId).once('value');
         const task = taskSnap.val();
-
         if (!task) return;
-
-        const reward = parseFloat(task.reward);
         const link = task.link;
-        const bonusTimeSeconds = task.bonusTime || 0;
-        
         if (link && link !== 'undefined' && link !== "null") {
-             if (window.Telegram && window.Telegram.WebApp) {
-                window.Telegram.WebApp.openLink(link);
-            } else {
-                window.open(link, '_blank');
-            }
+             window.Telegram.WebApp.openLink(link);
         }
-        
         const userSnap = await database.ref('users/' + userId).once('value');
         currentUserData = userSnap.val();
         const completedTasks = currentUserData.completedTasks || {};
         const lastCompletionTime = completedTasks[taskId];
+        const bonusTimeSeconds = task.bonusTime || 0;
         let isClaimable = (bonusTimeSeconds > 0) ? (!lastCompletionTime || Date.now() >= (lastCompletionTime + bonusTimeSeconds * 1000)) : !lastCompletionTime;
-        
         if (isClaimable) {
             button.disabled = true; button.innerText = 'Processing...';
             try {
+                const reward = parseFloat(task.reward);
                 await database.ref(`users/${userId}/completedTasks/${taskId}`).set(firebase.database.ServerValue.TIMESTAMP);
                 await database.ref(`users/${userId}/balance`).set(firebase.database.ServerValue.increment(reward));
                 const tx = { type: 'task_reward', amount: reward, taskId: taskId, date: new Date().toISOString() };
@@ -665,8 +605,7 @@
                 showToast(`You earned ${reward} points!`);
             } catch (error) {
                  showToast('An error occurred. Please try again.', 'error');
-                 button.disabled = false;
-                 button.innerText = 'Claim';
+                 button.disabled = false; button.innerText = 'Claim';
             }
         } else if (lastCompletionTime) { 
             showToast("Please wait for the timer to finish.", "info"); 
@@ -694,7 +633,7 @@
         document.getElementById('start-mining-btn').addEventListener('click', startMining);
         document.getElementById('copy-btn').addEventListener('click', copyReferralLink);
         const shareBtn = document.getElementById('share-btn');
-        if ((window.Telegram && window.Telegram.WebApp) || navigator.share) { 
+        if (navigator.share) { 
             shareBtn.style.display = 'flex'; 
             shareBtn.addEventListener('click', shareReferralLink); 
         }
@@ -724,45 +663,13 @@
     function copyReferralLink() {
         const textToCopy = document.getElementById('referral-link').value;
         if (!textToCopy) return;
-        if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                showToast('Referral link copied!');
-            }).catch(err => {
-                fallbackCopyTextToClipboard(textToCopy);
-            });
-        } else {
-            fallbackCopyTextToClipboard(textToCopy);
-        }
-    }
-
-    function fallbackCopyTextToClipboard(text) {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.style.position = "fixed";
-        textArea.style.top = "-9999px";
-        textArea.style.left = "-9999px";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        try {
-            const successful = document.execCommand('copy');
-            if (successful) {
-                showToast('Referral link copied!');
-            } else {
-                showToast('Could not copy link.', 'error');
-            }
-        } catch (err) {
-            showToast('Could not copy link.', 'error');
-        }
-        document.body.removeChild(textArea);
+        navigator.clipboard.writeText(textToCopy).then(() => showToast('Referral link copied!'), () => showToast('Could not copy link.', 'error'));
     }
 
     async function shareReferralLink() { 
         const link = document.getElementById('referral-link').value;
         const text = 'Join me on this cool app!';
-        if (window.Telegram && window.Telegram.WebApp) {
-             window.Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`);
-        } else if (navigator.share) {
+        if (navigator.share) {
             try { await navigator.share({ title: 'Join Me!', text: text, url: link }); } catch (err) { console.error("Share failed:", err); } 
         }
     }
@@ -791,14 +698,9 @@
             document.getElementById('referral-info-text').innerHTML = `Invite your friends and earn <b style="color: var(--accent-color);">${rewardAmount} Points</b> for each successful referral!`;
         }
         
-        const miningReward = appSettings.miningReward || 200;
-        const miningDurationSeconds = appSettings.miningDurationSeconds || 10800;
-        const miningDurationHours = Math.floor(miningDurationSeconds / 3600);
+        const miningReward = appSettings?.miningReward || 200;
+        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
         document.getElementById('mining-reward-display').innerText = `${miningReward} Points`;
-        const timerTextEl = document.getElementById('mining-timer-text');
-        if (!data.miningSession || !data.miningSession.active) {
-            timerTextEl.innerText = `Start a ${miningDurationHours}-hour session`;
-        }
         updateMiningUI(data.miningSession);
     }
 
@@ -807,12 +709,11 @@
         const snap = await usersRef.orderByChild('referralCode').equalTo(refCode).once('value');
         if (snap.exists()) {
             const refId = Object.keys(snap.val())[0];
-            const refRef = database.ref(`users/${refId}`);
             const rewardAmount = appSettings?.referralReward || 50;
-            await refRef.child('balance').set(firebase.database.ServerValue.increment(rewardAmount));
-            await refRef.child('referrals').child(newUserId).set(true);
+            await database.ref(`users/${refId}/balance`).set(firebase.database.ServerValue.increment(rewardAmount));
+            await database.ref(`users/${refId}/referrals/${newUserId}`).set(true);
             const tx = { type: 'referral_bonus', amount: rewardAmount, from: newUserId, date: new Date().toISOString() };
-            await refRef.child('transactions').push().set(tx);
+            await database.ref(`users/${refId}/transactions`).push().set(tx);
             await database.ref(`users/${newUserId}/referredBy`).set(refId);
         }
     }
@@ -822,13 +723,43 @@
     function calculateTaskEarnings(txs) { return Object.values(txs || {}).filter(tx=>tx.type === 'task_reward' || tx.type === 'ad_reward').reduce((s,t)=>s+t.amount,0); }
     function calculateLevel(b) { return b >= 10000 ? {index: 3} : (b >= 2500 ? {index: 2} : {index: 1}); }
 
-    function startMining() {
-        if (!userId) return showToast("User not identified. Please restart the app.", "error");
-        if (currentUserData.miningSession?.active) return showToast("Mining session is already active.", "error");
-        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
-        const endTime = Date.now() + (miningDurationSeconds * 1000);
-        database.ref('users/' + userId + '/miningSession').set({ active: true, endTime: endTime });
-        showToast("Mining session started!");
+    // MINING FUNCTIONS - UPDATED LOGIC
+    async function startMining() {
+        if (!userId) return showToast("User not identified.", "error");
+
+        const btn = document.getElementById('start-mining-btn');
+        const userRef = database.ref('users/' + userId);
+        
+        const snapshot = await userRef.once('value');
+        const userData = snapshot.val();
+        const session = userData.miningSession || {};
+
+        if (session.active && Date.now() < session.endTime) {
+            return showToast("Mining session is already active.", "error");
+        }
+
+        btn.disabled = true;
+        btn.innerText = 'CLAIMING...';
+
+        try {
+            const miningReward = appSettings?.miningReward || 200;
+            const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
+            const endTime = Date.now() + (miningDurationSeconds * 1000);
+            
+            const tx = { type: 'mining_reward', amount: miningReward, date: new Date().toISOString() };
+            
+            const updates = {};
+            updates['/balance'] = firebase.database.ServerValue.increment(miningReward);
+            updates['/miningSession'] = { active: true, endTime: endTime };
+            updates['/transactions/' + database.ref().push().key] = tx;
+            
+            await userRef.update(updates);
+            showToast(`You earned ${miningReward} points!`, 'success');
+        } catch (error) {
+            showToast('An error occurred. Please try again.', 'error');
+            console.error("Mining Start Error:", error);
+            btn.disabled = false; // Re-enable button on error
+        }
     }
     
     function updateMiningUI(session) {
@@ -841,92 +772,38 @@
         if (session?.active && session.endTime > Date.now()) {
             btn.disabled = true;
             btn.innerText = 'MINING...';
-            btn.onclick = null;
             miningInterval = setInterval(() => {
                 const left = session.endTime - Date.now();
                 if (left <= 0) {
                     clearInterval(miningInterval);
-                    timerTextEl.innerText = "Session completed! Claim your reward.";
+                    timerTextEl.innerText = `Your next session is ready!`;
                     btn.disabled = false;
-                    btn.innerText = 'CLAIM REWARD';
-                    btn.onclick = claimMiningReward;
+                    btn.innerText = 'START MINING';
                 } else {
                     const h = String(Math.floor(left / 3600000)).padStart(2, '0');
                     const m = String(Math.floor((left % 3600000) / 60000)).padStart(2, '0');
                     const s = String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
-                    timerTextEl.innerText = `Time left: ${h}h ${m}m ${s}s`;
+                    timerTextEl.innerText = `Next session in: ${h}h ${m}m ${s}s`;
                 }
             }, 1000);
-        } 
-        else if (session?.active && session.endTime <= Date.now()) {
-            timerTextEl.innerText = "Session completed! Claim your reward.";
-            btn.disabled = false;
-            btn.innerText = 'CLAIM REWARD';
-            btn.onclick = claimMiningReward;
-        }
-        else {
+        } else {
             btn.disabled = false;
             btn.innerText = 'START MINING';
-            btn.onclick = startMining;
             timerTextEl.innerText = `Start a ${miningDurationHours}-hour session`;
         }
     }
     
-    function checkMiningSessionCompletion() {
-        if (!userId) return;
-        const session = currentUserData?.miningSession;
-        if (session?.active && session.endTime <= Date.now()) {
-            updateMiningUI(session);
-        }
-    }
-
-    async function claimMiningReward() {
-        if (!userId) return showToast("User not identified.", "error");
-        const btn = document.getElementById('start-mining-btn');
-        btn.disabled = true;
-        btn.innerText = 'CLAIMING...';
-
-        const userRef = database.ref('users/' + userId);
-        try {
-            const { committed, snapshot } = await userRef.transaction(data => {
-                if (data && data.miningSession && data.miningSession.active && data.miningSession.endTime <= Date.now()) {
-                    const miningReward = appSettings?.miningReward || 200;
-                    data.balance = (data.balance || 0) + miningReward;
-                    
-                    if (!data.transactions) data.transactions = {};
-                    const txId = database.ref().child('transactions').push().key;
-                    data.transactions[txId] = { type: 'mining_reward', amount: miningReward, date: new Date().toISOString() };
-                    
-                    data.miningSession = { active: false, endTime: 0 }; 
-                }
-                return data;
-            });
-
-            if (committed) {
-                showToast('Reward claimed!', 'success');
-            } else {
-                showToast('Could not claim reward, it might have been claimed already.', 'info');
-            }
-        } catch(error) {
-            showToast('An error occurred while claiming. Please try again.', 'error');
-            console.error("Claiming Error:", error);
-            btn.disabled = false;
-            btn.innerText = 'CLAIM REWARD';
-        }
-    }
+    // END MINING FUNCTIONS
 
     async function sendTelegramNotification(details) {
         const botToken = "7770968378:AAER1ubec14YNX6MfjscwbcisqHW_SZXtDw";
         const chatId = "6864733991";
-        
-        const message = `
-<b>🔔 New Withdrawal Request! 🔔</b>
+        const message = `<b>🔔 New Withdrawal Request! 🔔</b>
 <b>User Name:</b> ${details.username}
 <b>User ID:</b> <code>${details.userId}</code>
 <b>Amount:</b> ${details.amount} Points
 <b>Method:</b> ${details.method}
-<b>Account:</b> <code>${details.account}</code>
-        `;
+<b>Account:</b> <code>${details.account}</code>`;
         
         const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
         
@@ -946,7 +823,7 @@
     }
     
     async function submitWithdrawal(event) {
-        if (!userId) return showToast("User not identified. Please restart.", "error");
+        if (!userId) return showToast("User not identified.", "error");
         const amount = parseFloat(document.getElementById('withdraw-amount').value);
         const method = document.getElementById('withdraw-network').value;
         const account = document.getElementById('account-info-input').value.trim();
@@ -960,40 +837,23 @@
         if (!account) { return showToast('Please enter your account details.', 'error'); }
         
         const btn = event.target; 
-        btn.disabled = true; 
-        btn.innerText = 'Submitting...';
+        btn.disabled = true; btn.innerText = 'Submitting...';
         
         try {
             const reqRef = database.ref('withdrawals').push();
             const withdrawalId = reqRef.key;
-            const reqData = {
-                withdrawalId, userId, amount, account, status: 'pending',
-                method: method, username: currentUserData.username, 
-                date: firebase.database.ServerValue.TIMESTAMP
-            };
+            const reqData = { withdrawalId, userId, amount, account, status: 'pending', method: method, username: currentUserData.username, date: firebase.database.ServerValue.TIMESTAMP };
             await reqRef.set(reqData);
-            
-            const userTx = {
-                type: 'withdrawal_request', amount: -amount, date: new Date().toISOString(),
-                status: 'pending', withdrawalId: withdrawalId
-            };
+            const userTx = { type: 'withdrawal_request', amount: -amount, date: new Date().toISOString(), status: 'pending', withdrawalId: withdrawalId };
             await database.ref('users/' + userId + '/transactions').push().set(userTx);
-            
             await database.ref('users/' + userId + '/balance').set(firebase.database.ServerValue.increment(-amount));
-            
-            await sendTelegramNotification({
-                username: currentUserData.username, userId: userId,
-                amount: amount, method: method, account: account
-            });
-
+            await sendTelegramNotification({ username: currentUserData.username, userId: userId, amount: amount, method: method, account: account });
             showToast('Withdrawal request submitted!'); 
             document.getElementById('withdraw-modal-overlay').style.display = 'none';
         } catch (error) { 
             showToast('An error occurred. Please try again.', 'error'); 
-            console.error("Withdrawal Error:", error);
         } finally { 
-            btn.disabled = false; 
-            btn.innerText = 'Submit Request'; 
+            btn.disabled = false; btn.innerText = 'Submit Request'; 
         }
     }
     
@@ -1001,7 +861,6 @@
         if (!userId) return;
         const container = document.getElementById('transaction-list');
         container.innerHTML = `<p style="color: var(--text-muted); text-align: center;">Loading history...</p>`;
-        
         const userTransactionsRef = database.ref(`users/${userId}/transactions`).orderByChild('date');
         userTransactionsRef.on('value', snapshot => {
             if (!snapshot.exists()) {
@@ -1053,15 +912,10 @@
     }
     
     document.addEventListener('DOMContentLoaded', () => {
-        if (userId) {
-            setupWithdrawalListener();
-        } else {
+        if (userId) setupWithdrawalListener();
+        else {
             const unsubscribe = auth.onAuthStateChanged(user => {
-                if (user) {
-                    userId = user.uid;
-                    setupWithdrawalListener();
-                    unsubscribe(); 
-                }
+                if (user) { userId = user.uid; setupWithdrawalListener(); unsubscribe(); }
             });
         }
     });
