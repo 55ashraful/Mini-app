@@ -699,7 +699,6 @@
         }
         
         const miningReward = appSettings?.miningReward || 200;
-        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
         document.getElementById('mining-reward-display').innerText = `${miningReward} Points`;
         updateMiningUI(data.miningSession);
     }
@@ -725,7 +724,7 @@
 
     // MINING FUNCTIONS - UPDATED LOGIC
     async function startMining() {
-        if (!userId) return showToast("User not identified.", "error");
+        if (!userId || !appSettings) return showToast("User not identified or settings not loaded.", "error");
 
         const btn = document.getElementById('start-mining-btn');
         const userRef = database.ref('users/' + userId);
@@ -742,8 +741,9 @@
         btn.innerText = 'CLAIMING...';
 
         try {
-            const miningReward = appSettings?.miningReward || 200;
-            const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
+            const miningReward = appSettings.miningReward || 200;
+            const miningDurationHours = appSettings.miningDurationHours || 3;
+            const miningDurationSeconds = miningDurationHours * 3600;
             const endTime = Date.now() + (miningDurationSeconds * 1000);
             
             const tx = { type: 'mining_reward', amount: miningReward, date: new Date().toISOString() };
@@ -758,15 +758,15 @@
         } catch (error) {
             showToast('An error occurred. Please try again.', 'error');
             console.error("Mining Start Error:", error);
-            btn.disabled = false; // Re-enable button on error
+            btn.disabled = false;
         }
     }
     
     function updateMiningUI(session) {
+        if (!appSettings) return; 
         const btn = document.getElementById('start-mining-btn');
         const timerTextEl = document.getElementById('mining-timer-text');
-        const miningDurationSeconds = appSettings?.miningDurationSeconds || 10800;
-        const miningDurationHours = Math.floor(miningDurationSeconds / 3600);
+        const miningDurationHours = appSettings.miningDurationHours || 3;
         clearInterval(miningInterval);
         
         if (session?.active && session.endTime > Date.now()) {
